@@ -17,6 +17,7 @@ import signal
 import sys
 import inspect
 import bisect
+from pushbullet import Pushbullet
 
 LOG_FILE = "washer_dryer_notifier.log"
 CONFIG_FILE = "washer_dryer_notifier.config"
@@ -90,6 +91,10 @@ class Appliance():
     def get_appliance_mode(self) -> ApplianceMode:
         return self.appliance_mode
     
+
+    def set_appliance_mode(self, mode: ApplianceMode) -> None:
+        self.appliance_mode = mode
+    
     
     def set_appliance_idle_power(self, appliance_idle_power: float) -> None:
         self.appliance_idle_power = appliance_idle_power
@@ -106,7 +111,25 @@ class Appliance():
     def get_appliance_running_power(self) -> float:
         return self.appliance_running_power
 
-    def query(self) -> ApplianceMode:
+    async def query(self) -> ApplianceMode:
+        '''
+        State machine
+
+        Returns:
+            ApplianceMode: Resulting State
+        '''
+        logger.info(f"{self.get_appliance_name()}: query: ENTRY mode: {self.appliance_mode}")
+        power = await self.get_power()
+        match self.appliance_mode:
+            case ApplianceMode.IDLE:
+                if power <= (2 * self.appliance_idle_power):
+                    pass
+                else:
+                    self.appliance_mode = ApplianceMode.RUNNING
+            case ApplianceMode.RUNNING:
+                if power == self.appliance_idle_power:
+                    self.appliance_mode = ApplianceMode.FINISHED
+        logger.info(f"{self.get_appliance_name()}: query: EXIT mode: {self.appliance_mode}")
         return self.appliance_mode
     
 
@@ -127,6 +150,8 @@ dryer: Appliance = None
 appliances: [] = []
 setup_mode: bool = False
 cutoff_power = CUTOFF_POWER
+access_token: str = None
+pb: Pushbullet = None
 
 def fn_name():
     return inspect.currentframe().f_back.f_code.co_name
@@ -189,7 +214,13 @@ def is_running(plug: SmartDevice) -> bool:
     return power > cutoff_power
 
 def notify_finished(appliance: Appliance) -> None:
-    pass
+    global pb
+    logger.info(f"notify_finished: ENTRY")
+
+    if pb == None:
+        logger.error(f"notify_finished(), no pushbullet specified, will not notify")
+        return
+    pb.push_note(f"{appliance.get_appliance_name()}", f"FINISHED")
 
 
 def create_config_file(appliances: list[Appliance]) -> None:
@@ -201,6 +232,20 @@ def create_config_file(appliances: list[Appliance]) -> None:
         config.set(section_name, RUNNING_TAG, str(appliance.get_appliance_running_power()))
     with open(CONFIG_FILE, "w") as config_file:
         config.write(config_file)
+
+
+def read_config_file(appliances: list[Appliance]) -> Union[None, Exception]:
+    config = configparser.ConfigParser()
+    try:
+        config.read(CONFIG_FILE)
+        for appliance in appliances:
+            section_name = appliance.get_appliance_name()
+            appliance.set_appliance_idle_power = config[section_name][IDLE_TAG]
+            appliance.set_appliance_running_power = config[section_name][RUNNING_TAG]
+    except Exception as e:
+        msg = f"Exception in read_config_file: {e}"
+        logger.error(f"Exception in read_config_file: {e}")
+        raise Exception(msg)
 
 
 async def setup_loop(appliances: list[Appliance]) -> bool:
@@ -293,21 +338,28 @@ async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo]) -> bo
     logger.info(f"setup_mode: {setup_mode}, appliances: {repr(appliances)}")
     if setup_mode:
         return await setup_loop(appliances)
-    # main running loop forever
-    retry_ct = 0
-    normal_finish = False
-    while retry_ct < RETRY_MAX:
-        try:
-            for appliance in appliances:
-                if appliance.query() == ApplianceMode.FINISHED:
-                    notify_finished(appliance)
-        except Exception as e:
-            # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
-            retry_ct = retry_ct + 1
-            logger.error(f'ERROR, unexpected exit from main_loop: {e}, retry_ct: {retry_ct}')
-            await asyncio.sleep(RETRY_SLEEP_DELAY)
-        await asyncio.sleep(PROBE_INTERVAL_SECS)
-    return True
+    try:
+        # main running loop forever
+        read_config_file(appliances)
+        
+        retry_ct = 0
+        while retry_ct < RETRY_MAX:
+            logger.info(f"main_loop: LOOP TOP")
+            try:
+                for appliance in appliances:
+                    appliance_state = await appliance.query()
+                    if appliance_state == ApplianceMode.FINISHED:
+                        notify_finished(appliance)
+                        appliance.set_appliance_mode(ApplianceMode.IDLE)
+            except Exception as e:
+                # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
+                retry_ct = retry_ct + 1
+                logger.error(f'ERROR, unexpected exit from main_loop: {e}, retry_ct: {retry_ct}')
+                await asyncio.sleep(RETRY_SLEEP_DELAY)
+            await asyncio.sleep(PROBE_INTERVAL_SECS)
+        return True
+    except Exception as e:
+        logger.error(f"main_loop Exception: {e}")
 
 def setup_logging_handlers(log_file: str) -> list:
     try:
@@ -376,11 +428,15 @@ def init_argparse() -> argparse.ArgumentParser:
         '-l', '--log_file_name', metavar='',
         help='specifies custom log file name'
     )
+    parser.add_argument(
+        '-a', '--access_token', metavar='',
+        help='specifies pushbullet access token'
+    )
     return parser
 
 
 def main() -> None:
-    global log_file, logger, setup_mode
+    global log_file, logger, setup_mode, access_token, pb
 
     plugs: list[AppliancePlugInfo] = []
 
@@ -396,10 +452,16 @@ def main() -> None:
         plugs.append(AppliancePlugInfo(ApplianceType.DRYER, args.dryer_plug_name))
     if args.setup_mode != None:
         setup_mode = args.setup_mode
+    if args.access_token != None:
+        access_token = args.access_token
 
     logger = init_logging(log_file)
 
-    logger.info(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode} <<<<<')
+    if access_token == None:
+        logger.warning(f"main: no access_token, cannot send pushbullet notifications")
+    else:
+        pb = Pushbullet(access_token)
+    logger.info(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pb} <<<<<')
     success = asyncio.run(main_loop(setup_mode, plugs))
     logger.info(f'>>>>> FINI <<<<<')
 
