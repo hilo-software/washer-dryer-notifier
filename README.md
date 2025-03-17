@@ -9,7 +9,9 @@
   - The KP115 Smart Plug and the HS300 Smart Strip models are compatible
 - The target plug must have an alias name assigned to it.
 - Kasa python library to access TP-Link Smart Plug features from python
-- PushBullet account and phone app
+- Pushbullet account and phone app
+- Python pushbullet.py
+  - ``` pip install pushbullet.py ```
 ## How it works
 - The washer and dryer must be plugged into TP-Link Smart Plugs.
   - Because of the high current draw of the washer and dryer, the suggested plug is model KP115.  Other plugs have not been tested.

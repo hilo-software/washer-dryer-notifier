@@ -16,8 +16,7 @@ import atexit
 import signal
 import sys
 import inspect
-import bisect
-from pushbullet import Pushbullet
+import requests
 
 LOG_FILE = "washer_dryer_notifier.log"
 CONFIG_FILE = "washer_dryer_notifier.config"
@@ -31,6 +30,7 @@ RETRY_MAX = 3
 RETRY_SLEEP_DELAY = 30
 IDLE_TAG = 'idle'
 RUNNING_TAG = 'running'
+PUSHBULLET_CHANNEL_TAG = "washer_dryer_notifier"
 
 
 class ApplianceType(Enum):
@@ -42,6 +42,32 @@ class ApplianceMode(Enum):
     IDLE = 1
     RUNNING = 2
     FINISHED = 3
+
+
+class PushbulletBroadcaster:
+    def __init__(self, access_token: str, channel_tag: str):
+        self.access_token = access_token
+        self.channel_tag = channel_tag
+        self.headers = {
+            "Access-Token": self.access_token,
+            "Content-Type": "application/json"
+        }
+
+    def send_notification(self, title: str, message: str):
+        payload = {
+            "type": "note",
+            "title": title,
+            "body": message,
+            "channel_tag": self.channel_tag
+        }
+
+        response = requests.post("https://api.pushbullet.com/v2/pushes", json=payload, headers=self.headers)
+
+        if response.status_code == 200:
+            print("✅ Notification sent successfully!")
+        else:
+            print(f"❌ Failed to send notification: {response.status_code} - {response.json()}")
+
 
 
 @dataclass
@@ -151,7 +177,7 @@ appliances: [] = []
 setup_mode: bool = False
 cutoff_power = CUTOFF_POWER
 access_token: str = None
-pb: Pushbullet = None
+pbb: PushbulletBroadcaster = None
 
 def fn_name():
     return inspect.currentframe().f_back.f_code.co_name
@@ -214,13 +240,13 @@ def is_running(plug: SmartDevice) -> bool:
     return power > cutoff_power
 
 def notify_finished(appliance: Appliance) -> None:
-    global pb
+    global pbb
     logger.info(f"notify_finished: ENTRY")
 
-    if pb == None:
-        logger.error(f"notify_finished(), no pushbullet specified, will not notify")
+    if pbb == None:
+        logger.error(f"notify_finished(), no pushbullet specified, will not notify channel")
         return
-    pb.push_note(f"{appliance.get_appliance_name()}", f"FINISHED")
+    pbb.send_notification(f"{appliance.get_appliance_name()}", f"FINISHED")
 
 
 def create_config_file(appliances: list[Appliance]) -> None:
@@ -432,11 +458,15 @@ def init_argparse() -> argparse.ArgumentParser:
         '-a', '--access_token', metavar='',
         help='specifies pushbullet access token'
     )
+    parser.add_argument(
+        '-c', '--channel_tag', metavar='',
+        help='specifies pushbullet channel tag'
+    )
     return parser
 
 
 def main() -> None:
-    global log_file, logger, setup_mode, access_token, pb
+    global log_file, logger, setup_mode, access_token, pbb
 
     plugs: list[AppliancePlugInfo] = []
 
@@ -454,14 +484,16 @@ def main() -> None:
         setup_mode = args.setup_mode
     if args.access_token != None:
         access_token = args.access_token
+    if args.channel_tag != None:
+        channel_tag = args.channel_tag
 
     logger = init_logging(log_file)
 
-    if access_token == None:
-        logger.warning(f"main: no access_token, cannot send pushbullet notifications")
+    if access_token == None or channel_tag == None:
+        logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
     else:
-        pb = Pushbullet(access_token)
-    logger.info(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pb} <<<<<')
+        pbb = PushbulletBroadcaster(access_token, channel_tag)
+    logger.info(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
     success = asyncio.run(main_loop(setup_mode, plugs))
     logger.info(f'>>>>> FINI <<<<<')
 
