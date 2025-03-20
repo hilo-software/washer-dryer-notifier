@@ -20,7 +20,6 @@ import requests
 
 LOG_FILE = "washer_dryer_notifier.log"
 CONFIG_FILE = "washer_dryer_notifier.config"
-CUTOFF_POWER = 3.0
 SETUP_PROBE_INTERVAL_SECS = 30
 RUNNING_TIME_WAIT_SECS = 60
 RUNNING_SETUP_RETRY_MAX = 5
@@ -31,6 +30,9 @@ RETRY_SLEEP_DELAY = 30
 IDLE_TAG = 'idle'
 RUNNING_TAG = 'running'
 PUSHBULLET_CHANNEL_TAG = "washer_dryer_notifier"
+INIT_TIMEOUT = 30
+UPDATE_TIMEOUT = 10
+TURN_ON_TIMEOUT = 10
 
 
 class ApplianceType(Enum):
@@ -53,6 +55,21 @@ class PushbulletBroadcaster:
             "Content-Type": "application/json"
         }
 
+    
+    def post_bullet(payload, headers: dict[str, str]) -> requests.Response:
+        '''
+        Wrapper for the request.post function
+
+        Args:
+            payload (_type_): http post payload
+            headers (dict[str, str]): http header specific to Pushbullet with API key and channel_tag
+
+        Returns:
+            requests.Response: http response
+        '''
+        return requests.post("https://api.pushbullet.com/v2/pushes", json=payload, headers=headers)
+    
+
     def send_notification(self, title: str, message: str):
         payload = {
             "type": "note",
@@ -61,7 +78,8 @@ class PushbulletBroadcaster:
             "channel_tag": self.channel_tag
         }
 
-        response = requests.post("https://api.pushbullet.com/v2/pushes", json=payload, headers=self.headers)
+        # response = requests.post("https://api.pushbullet.com/v2/pushes", json=payload, headers=self.headers)
+        response = PushbulletBroadcaster.post_bullet(payload, self.headers)
 
         if response.status_code == 200:
             print("✅ Notification sent successfully!")
@@ -160,7 +178,7 @@ class Appliance():
     
 
     async def get_power(self) -> float:
-        await self.appliance_plug.appliance_plug.update()
+        await asyncio.wait_for(self.appliance_plug.appliance_plug.update(), UPDATE_TIMEOUT)
         return self.appliance_plug.appliance_plug.emeter_realtime.power
 
 
@@ -175,32 +193,12 @@ washer: Appliance = None
 dryer: Appliance = None
 appliances: [] = []
 setup_mode: bool = False
-cutoff_power = CUTOFF_POWER
 access_token: str = None
 pbb: PushbulletBroadcaster = None
 
 def fn_name():
     return inspect.currentframe().f_back.f_code.co_name
 
-async def init(target_plug_name: str) -> SmartDevice:
-    '''
-    async function.  Uses kasa library to discover and find target device matching target_plug alias.
-
-    Returns:
-        True if plug is found
-    '''
-    found = await Discover.discover()
-    for smart_device in found.values():
-        await smart_device.update()
-        if smart_device.alias == target_plug_name:
-            if not smart_device.is_on:
-                if not await turn_on(smart_device):
-                    return None
-                logger.info(f"plug: was off, now successfully turned on so we delay {PLUG_SETTLE_TIME_SECS} seconds to allow power to settle")
-                await asyncio.sleep(PLUG_SETTLE_TIME_SECS)
-                await smart_device.update()
-            return smart_device
-    return None
 
 async def init_plugs(target_plug_infos: list[AppliancePlugInfo]) -> list[AppliancePlug]:
     '''
@@ -210,34 +208,41 @@ async def init_plugs(target_plug_infos: list[AppliancePlugInfo]) -> list[Applian
         list of matching plugs
     '''
     matching_plugs: list[AppliancePlug] = []
-    found = await Discover.discover()
-    for smart_device in found.values():
-        await smart_device.update()
-        for target_plug_info in target_plug_infos:
-            if smart_device.alias == target_plug_info.appliance_plug_name:
-                if not smart_device.is_on:
-                    if not await turn_on(smart_device):
-                        logger.warning(f"WARNING: Unable to turn on plug: {target_plug_info.appliance_plug_name}")
-                        continue
-                    logger.info(f"plug: was off, now successfully turned on so we delay {PLUG_SETTLE_TIME_SECS} seconds to allow power to settle")
-                    await asyncio.sleep(PLUG_SETTLE_TIME_SECS)
-                    await smart_device.update()
-                matching_plugs.append(AppliancePlug(target_plug_info, smart_device))
+    try:
+        found = await asyncio.wait_for(Discover.discover(), INIT_TIMEOUT)
+        for smart_device in found.values():
+            await asyncio.wait_for(smart_device.update(), UPDATE_TIMEOUT)
+            for target_plug_info in target_plug_infos:
+                if smart_device.alias == target_plug_info.appliance_plug_name:
+                    if not smart_device.is_on:
+                        if not await asyncio.wait_for(turn_on(smart_device), TURN_ON_TIMEOUT):
+                            logger.warning(f"WARNING: Unable to turn on plug: {target_plug_info.appliance_plug_name}")
+                            continue
+                        logger.info(f"plug: was off, now successfully turned on so we delay {PLUG_SETTLE_TIME_SECS} seconds to allow power to settle")
+                        await asyncio.sleep(PLUG_SETTLE_TIME_SECS)
+                        await asyncio.wait_for(smart_device.update(), UPDATE_TIMEOUT)
+                    matching_plugs.append(AppliancePlug(target_plug_info, smart_device))
+    except TimeoutError as te:
+        logger.error(f"init_plugs timed out: {te}")
+    except Exception as e:
+        logger.error(f"init_plugs Exception: {e}")
     return matching_plugs
 
+
 async def turn_on(plug: SmartDevice) -> bool:
-    await plug.turn_on()
-    await plug.update()
-    return plug.is_on
+    try:
+        await asyncio.wait_for(plug.turn_on(), TURN_ON_TIMEOUT)
+        await asyncio.wait_for(plug.update(), UPDATE_TIMEOUT)
+        return plug.is_on
+    except TimeoutError as te:
+        logger.error(f"init_plugs timed out: {te}")
+    except Exception as e:
+        logger.error(f"init_plugs Exception: {e}")
+    return False
+
 
 def get_power(plug: SmartDevice) -> float:
     return plug.emeter_realtime.power
-
-def is_running(plug: SmartDevice) -> bool:
-    global cutoff_power
-    power: float = get_power(plug)
-    logger.info(f"{fn_name()}: power: {power}")
-    return power > cutoff_power
 
 def notify_finished(appliance: Appliance) -> None:
     global pbb
@@ -327,20 +332,6 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
     else:
         return False
     return True
-
-async def verify_appliance(appliance_plug_name: str) -> Union[Appliance, ApplianceException]:
-    if appliance_plug_name == None:
-        return None
-    try:
-        appliance_plug = await init(appliance_plug_name)
-        if not appliance_plug:
-            raise ApplianceException(f"Unable to init the appliance_plug: {appliance_plug_name}")
-        appliance = Appliance(appliance_plug)
-        appliances.append(appliance)
-        return Appliance
-    except Exception as e:
-        logger.error(f"ERROR in verify_appliance: {e}")
-    return None
 
 
 async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Union[list[Appliance], ApplianceException]:

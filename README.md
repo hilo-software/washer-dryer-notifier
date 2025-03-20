@@ -36,7 +36,27 @@ $ ./scripts/washer_dryer_notifier.py -s -w washer -d dryer
 - Run the washer_dryer_notifier.py script as in Setup but without the "-s" switch.
 - For example:
 ```
-$ ./scripts/washer_dryer_notifier.py -w washer -d dryer
+$ ./scripts/washer_dryer_notifier.py -w washer -d dryer -a "<Pushbullet api key>" -c <Pushbullet channel>
 ```
 
 - This will run the script in continuous mode as described above.
+#### Command line args
+```
+$ ./scripts/washer_dryer_notifier.py -h
+/home/kelvin/sandbox/projects/washer_dryer_notifier/./scripts/washer_dryer_notifier.py:4: usage: washer_dryer_notifier.py [OPTIONS]
+
+Notify when washer, dryer finishes
+
+options:
+  -h, --help            show this help message and exit
+  -v, --version         show program's version number and exit
+  -s, --setup_mode      setup mode, detect voltage levels and create config file
+  -w , --washer_plug_name 
+                        specifies washer plug name
+  -d , --dryer_plug_name 
+                        specifies dryer plug name
+  -l , --log_file_name 
+                        specifies custom log file name
+  -a , --access_token   specifies pushbullet access token
+  -c , --channel_tag    specifies pushbullet channel tag
+```
