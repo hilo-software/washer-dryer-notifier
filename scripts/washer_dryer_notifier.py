@@ -33,6 +33,9 @@ PUSHBULLET_CHANNEL_TAG = "washer_dryer_notifier"
 INIT_TIMEOUT = 30
 UPDATE_TIMEOUT = 10
 TURN_ON_TIMEOUT = 10
+CUSTOM_LEVEL_NUM = 25
+CUSTOM_LEVEL_NAME = "CUSTOM"
+DEFAULT_LOGGING_LEVEL = CUSTOM_LEVEL_NUM
 
 
 class ApplianceType(Enum):
@@ -246,7 +249,7 @@ def get_power(plug: SmartDevice) -> float:
 
 def notify_finished(appliance: Appliance) -> None:
     global pbb
-    logger.info(f"notify_finished: ENTRY")
+    logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
 
     if pbb == None:
         logger.error(f"notify_finished(), no pushbullet specified, will not notify channel")
@@ -296,8 +299,8 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
     for appliance in appliances:
         idle_power = await appliance.get_power()
         appliance.set_appliance_idle_power(idle_power)
-        logger.info(f"We have set the IDLE power: {idle_power} for the appliance: {appliance.get_appliance_name()}")
-    logger.info(f"We have set the IDLE power for the appliance(s)")
+        logger.custom(f"We have set the IDLE power: {idle_power} for the appliance: {appliance.get_appliance_name()}")
+    logger.custom(f"We have set the IDLE power for the appliance(s)")
 
     await asyncio.sleep(RUNNING_TIME_WAIT_SECS)
 
@@ -314,7 +317,7 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
                 else:
                     appliance.set_appliance_running_power(running_power)
         if running_power_set:
-            logger.info(f"We have set the RUNNING power for the appliance(s)")
+            logger.custom(f"We have set the RUNNING power for the appliance(s)")
             break
 
         logger.warning(f"At least one appliance failed to detect a valid RUNNING voltage, retry_count: {retry_count}")
@@ -325,7 +328,7 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
         if elapsed_seconds > retry_seconds_max:
             logger.error(f"UNABLE to set running power in one or more appliances: {repr(appliances)}")
             break
-    logger.info(f"setup_loop: running_power_set: {running_power_set}, retry_count: {retry_count}, elapsed_seconds: {elapsed_seconds}")
+    logger.custom(f"setup_loop: running_power_set: {running_power_set}, retry_count: {retry_count}, elapsed_seconds: {elapsed_seconds}")
     #  if successful, create a config file
     if idle_power_set and running_power_set:
         create_config_file(appliances)
@@ -400,16 +403,59 @@ def setup_logging_handlers(log_file: str) -> list:
     ]
     return logging_handlers
 
+# Define formats
+default_format = "%(asctime)s %(levelname)s: %(message)s"
+info_format = "%(message)s"
+custom_format = "%(asctime)s CUSTOM: %(message)s"
+
+
+def custom(self, message, *args, **kws):
+    if self.isEnabledFor(CUSTOM_LEVEL_NUM):
+        self._log(CUSTOM_LEVEL_NUM, message, args, **kws)
+
+
+class CustomFormatter(logging.Formatter):
+    def __init__(self, fmt=None, datefmt=None, info_fmt=None, custom_fmt=None, *args, **kwargs):
+        super().__init__(fmt, datefmt, *args, **kwargs)
+        self.default_fmt = fmt
+        self.info_fmt = info_fmt
+        self.custom_fmt = custom_fmt
+
+    def format(self, record):
+        # Use different format for INFO level
+        if record.levelno == logging.INFO:
+            self._style._fmt = self.info_fmt
+        # Use different format for CUSTOM level
+        elif record.levelno == CUSTOM_LEVEL_NUM:
+            self._style._fmt = self.custom_fmt
+            record.levelname = CUSTOM_LEVEL_NAME  # Ensure the custom level name is used
+        else:
+            self._style._fmt = self.default_fmt
+        return super().format(record)
+
+
 def init_logging(log_file: str) -> logging.Logger:
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-    # Create formatter with the specified date format
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+    logging.addLevelName(CUSTOM_LEVEL_NUM, CUSTOM_LEVEL_NAME)
+    logging.Logger.custom = custom
+    logger = logging.getLogger('')
+    logger.setLevel(DEFAULT_LOGGING_LEVEL)
+    formatter = CustomFormatter(fmt=default_format, info_fmt=info_format, custom_fmt=custom_format, datefmt="%Y-%m-%d %H:%M:%S")
     logging_handlers = setup_logging_handlers(log_file)
     for handler in logging_handlers:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     return logger
+
+# def init_logging(log_file: str) -> logging.Logger:
+#     logger = logging.getLogger(__name__)
+#     logger.setLevel(logging.INFO)
+#     # Create formatter with the specified date format
+#     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
+#     logging_handlers = setup_logging_handlers(log_file)
+#     for handler in logging_handlers:
+#         handler.setFormatter(formatter)
+#         logger.addHandler(handler)
+#     return logger
 
 
 def init_argparse() -> argparse.ArgumentParser:
@@ -484,9 +530,9 @@ def main() -> None:
         logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
     else:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
-    logger.info(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
+    logger.custom(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
     success = asyncio.run(main_loop(setup_mode, plugs))
-    logger.info(f'>>>>> FINI <<<<<')
+    logger.custom(f'>>>>> FINI <<<<<')
 
 if __name__ == '__main__':
     main()
