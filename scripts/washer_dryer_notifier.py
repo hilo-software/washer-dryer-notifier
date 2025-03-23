@@ -82,9 +82,9 @@ class PushbulletBroadcaster:
         response = PushbulletBroadcaster.post_bullet(payload, self.headers)
 
         if response.status_code == 200:
-            print("✅ Notification sent successfully!")
+            logging.info("✅ Notification sent successfully!")
         else:
-            print(f"❌ Failed to send notification: {response.status_code} - {response.json()}")
+            logging.info(f"❌ Failed to send notification: {response.status_code} - {response.json()}")
 
 
 
