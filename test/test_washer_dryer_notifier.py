@@ -13,10 +13,26 @@ from scripts.washer_dryer_notifier import (
 )
 import scripts.washer_dryer_notifier as notifier
 
-# Dummy logger for tests
+# --- Extend dummy_logger with a custom method --- #
+CUSTOM_LEVEL_NUM = 25
+CUSTOM_LEVEL_NAME = "CUSTOM"
+logging.addLevelName(CUSTOM_LEVEL_NUM, CUSTOM_LEVEL_NAME)
+
+def dummy_custom(self, message, *args, **kwargs):
+    if self.isEnabledFor(CUSTOM_LEVEL_NUM):
+        self._log(CUSTOM_LEVEL_NUM, message, args, **kwargs)
+
+# Add the custom method to the Logger class
+logging.Logger.custom = dummy_custom
+
+# Create and configure the dummy_logger
 dummy_logger = logging.getLogger("dummy")
 dummy_logger.addHandler(logging.StreamHandler())
-dummy_logger.setLevel(logging.DEBUG)
+dummy_logger.setLevel(CUSTOM_LEVEL_NUM)
+
+# --- No-op sleep to avoid timeouts --- #
+async def no_sleep(duration):
+    return None
 
 # --- Dummy Classes for Testing Appliance --- #
 class DummyEmeter:
@@ -37,6 +53,21 @@ class DummySmartDevice:
         self.is_on = True
         return
 
+# --- Dummy Appliance for Testing main_loop Setup Mode --- #
+class DummyApplianceForSetup(Appliance):
+    def __init__(self, plug):
+        super().__init__(plug)
+        self.call_count = 0
+
+    async def get_power(self) -> float:
+        self.call_count += 1
+        # On first call, simulate idle power (1.0), then running power (3.0)
+        return 1.0 if self.call_count == 1 else 3.0
+
+    async def query(self) -> ApplianceMode:
+        # For this test, query is not used in setup mode
+        return self.appliance_mode
+    
 # --- Tests for PushbulletBroadcaster --- #
 @responses.activate
 def test_pushbullet_broadcaster_send_notification():
@@ -70,6 +101,8 @@ class DummyAppliance(Appliance):
 async def test_main_loop_setup_mode_no_appliances(monkeypatch):
     # Patch logger to avoid NoneType errors
     monkeypatch.setattr(notifier, "logger", dummy_logger)
+    # Patch asyncio.sleep with our no_sleep function to avoid delays
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
 
     dummy_device = DummySmartDevice(alias="DummyPlug", power=1.0, is_on=True)
     dummy_plug_info = AppliancePlugInfo(appliance_type=notifier.ApplianceType.WASHER, appliance_plug_name="DummyPlug")
@@ -83,6 +116,34 @@ async def test_main_loop_setup_mode_no_appliances(monkeypatch):
 
     result = await asyncio.wait_for(main_loop(True, []), timeout=10)
     assert result is False
+
+@pytest.mark.asyncio
+async def test_main_loop_setup_mode_with_appliances(monkeypatch):
+    # Patch logger to avoid NoneType errors
+    monkeypatch.setattr(notifier, "logger", dummy_logger)
+    # Patch asyncio.sleep with our no_sleep function to avoid delays
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    dummy_washer_device = DummySmartDevice(alias="washer", power=1.0, is_on=True)
+    dummy_washer_plug_info = AppliancePlugInfo(appliance_type=notifier.ApplianceType.WASHER, appliance_plug_name="washer")
+    dummy_washer_appliance_plug = AppliancePlug(dummy_washer_plug_info, dummy_washer_device)
+    dummy_washer_appliance = DummyApplianceForSetup(dummy_washer_appliance_plug)
+
+    dummy_dryer_device = DummySmartDevice(alias="dryer", power=1.0, is_on=True)
+    dummy_dryer_plug_info = AppliancePlugInfo(appliance_type=notifier.ApplianceType.DRYER, appliance_plug_name="dryer")
+    dummy_dryer_appliance_plug = AppliancePlug(dummy_dryer_plug_info, dummy_dryer_device)
+    dummy_dryer_appliance = DummyApplianceForSetup(dummy_dryer_appliance_plug)
+
+    appliances: list[DummyAppliance] = [dummy_washer_appliance, dummy_dryer_appliance]
+    appliance_plug_infos = [dummy_washer_plug_info, dummy_dryer_plug_info]
+
+    async def dummy_verify_appliances(appliance_plug_infos):
+        return appliances
+    monkeypatch.setattr(notifier, "verify_appliances", dummy_verify_appliances)
+    monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
+
+    result = await asyncio.wait_for(main_loop(True, appliance_plug_infos), timeout=10)
+    assert result is True
 
 @pytest.mark.asyncio
 async def test_main_loop_non_setup_mode_no_appliances(monkeypatch):
