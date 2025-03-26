@@ -12,6 +12,7 @@ from scripts.washer_dryer_notifier import (
     main_loop,
 )
 import scripts.washer_dryer_notifier as notifier
+import pdb
 
 # --- Extend dummy_logger with a custom method --- #
 CUSTOM_LEVEL_NUM = 25
@@ -162,3 +163,33 @@ async def test_main_loop_non_setup_mode_no_appliances(monkeypatch):
 
     result = await asyncio.wait_for(main_loop(False, []), timeout=10)
     assert result is False
+
+@pytest.mark.asyncio
+async def test_main_loop_non_setup_mode_with_appliances(monkeypatch):
+    # Patch logger to avoid NoneType errors
+    monkeypatch.setattr(notifier, "logger", dummy_logger)
+    # Patch asyncio.sleep with our no_sleep function to avoid delays
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    dummy_washer_device = DummySmartDevice(alias="washer", power=1.0, is_on=True)
+    dummy_washer_plug_info = AppliancePlugInfo(appliance_type=notifier.ApplianceType.WASHER, appliance_plug_name="washer")
+    dummy_washer_appliance_plug = AppliancePlug(dummy_washer_plug_info, dummy_washer_device)
+    dummy_washer_appliance = DummyApplianceForSetup(dummy_washer_appliance_plug)
+
+    dummy_dryer_device = DummySmartDevice(alias="dryer", power=1.0, is_on=True)
+    dummy_dryer_plug_info = AppliancePlugInfo(appliance_type=notifier.ApplianceType.DRYER, appliance_plug_name="dryer")
+    dummy_dryer_appliance_plug = AppliancePlug(dummy_dryer_plug_info, dummy_dryer_device)
+    dummy_dryer_appliance = DummyApplianceForSetup(dummy_dryer_appliance_plug)
+
+    appliances: list[DummyAppliance] = [dummy_washer_appliance, dummy_dryer_appliance]
+    appliance_plug_infos = [dummy_washer_plug_info, dummy_dryer_plug_info]
+
+    async def dummy_verify_appliances(appliance_plug_infos):
+        return appliances
+    
+    monkeypatch.setattr(notifier, "verify_appliances", dummy_verify_appliances)
+    monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
+
+    # pdb.set_trace()
+    result = await asyncio.wait_for(main_loop(False, appliance_plug_infos, 10), timeout=10)
+    assert result is True

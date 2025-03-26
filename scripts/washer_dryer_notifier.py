@@ -238,9 +238,9 @@ async def turn_on(plug: SmartDevice) -> bool:
         await asyncio.wait_for(plug.update(), UPDATE_TIMEOUT)
         return plug.is_on
     except TimeoutError as te:
-        logger.error(f"init_plugs timed out: {te}")
+        logger.error(f"turn_on timed out: {te}")
     except Exception as e:
-        logger.error(f"init_plugs Exception: {e}")
+        logger.error(f"turn_on Exception: {e}")
     return False
 
 
@@ -347,7 +347,8 @@ async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Un
     return appliances
 
 
-async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo]) -> bool:
+async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo], max_iterations: int = None) -> bool:
+    iterations = 0
     if len(plug_names) == 0:
         logger.error(f"ERROR, no washer or dryer specified, need at least one")
         return False
@@ -365,6 +366,11 @@ async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo]) -> bo
         retry_ct = 0
         while retry_ct < RETRY_MAX:
             logger.info(f"main_loop: LOOP TOP")
+            # Testability code
+            if max_iterations is not None:
+                iterations += 1
+                if iterations >= max_iterations:
+                    break
             try:
                 for appliance in appliances:
                     appliance_state = await appliance.query()
@@ -380,6 +386,7 @@ async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo]) -> bo
         return True
     except Exception as e:
         logger.error(f"main_loop Exception: {e}")
+    return False
 
 def setup_logging_handlers(log_file: str) -> list:
     try:
