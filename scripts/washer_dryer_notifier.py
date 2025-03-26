@@ -36,6 +36,7 @@ TURN_ON_TIMEOUT = 10
 CUSTOM_LEVEL_NUM = 25
 CUSTOM_LEVEL_NAME = "CUSTOM"
 DEFAULT_LOGGING_LEVEL = CUSTOM_LEVEL_NUM
+# DEFAULT_LOGGING_LEVEL = logging.INFO
 
 
 class ApplianceType(Enum):
@@ -85,9 +86,9 @@ class PushbulletBroadcaster:
         response = PushbulletBroadcaster.post_bullet(payload, self.headers)
 
         if response.status_code == 200:
-            logging.info("✅ Notification sent successfully!")
+            logger.custom("✅ Notification sent successfully!")
         else:
-            logging.info(f"❌ Failed to send notification: {response.status_code} - {response.json()}")
+            logger.error(f"❌ Failed to send notification: {response.status_code} - {response.json()}")
 
 
 
@@ -487,6 +488,11 @@ def init_argparse() -> argparse.ArgumentParser:
         help='setup mode, detect voltage levels and create config file'
     )
     parser.add_argument(
+        '-t', '--test_mode',
+        action='store_true',
+        help='test mode, send pushbullet broadcast test'
+    )
+    parser.add_argument(
         '-w', '--washer_plug_name', metavar='',
         help='specifies washer plug name'
     )
@@ -537,6 +543,11 @@ def main() -> None:
         logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
     else:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
+    if args.test_mode:
+        logger.warning(f"main: test_mode, sending notification")
+        pbb.send_notification(f"TEST notification", "FUBAR")
+        return
+    
     logger.custom(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
     success = asyncio.run(main_loop(setup_mode, plugs))
     logger.custom(f'>>>>> FINI <<<<<')
