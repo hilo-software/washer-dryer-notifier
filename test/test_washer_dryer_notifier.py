@@ -9,6 +9,7 @@ from scripts.washer_dryer_notifier import (
     Appliance,
     notify_finished,
     ApplianceMode,
+    RunMode,
     main_loop,
 )
 import scripts.washer_dryer_notifier as notifier
@@ -71,13 +72,15 @@ class DummyApplianceForSetup(Appliance):
     
 # --- Tests for PushbulletBroadcaster --- #
 @responses.activate
-def test_pushbullet_broadcaster_send_notification():
+def test_pushbullet_broadcaster_send_notification(monkeypatch):
     responses.add(
         responses.POST,
         "https://api.pushbullet.com/v2/pushes",
         json={"success": True},
         status=200,
     )
+    # Patch logger to avoid NoneType errors
+    monkeypatch.setattr(notifier, "logger", dummy_logger)
     broadcaster = PushbulletBroadcaster(access_token="dummy_token", channel_tag="dummy_channel")
     try:
         broadcaster.send_notification("Test Title", "Test Message")
@@ -115,7 +118,7 @@ async def test_main_loop_setup_mode_no_appliances(monkeypatch):
     monkeypatch.setattr(notifier, "verify_appliances", dummy_verify_appliances)
     monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
 
-    result = await asyncio.wait_for(main_loop(True, []), timeout=10)
+    result = await asyncio.wait_for(main_loop(RunMode.SETUP, []), timeout=10)
     assert result is False
 
 @pytest.mark.asyncio
@@ -143,7 +146,7 @@ async def test_main_loop_setup_mode_with_appliances(monkeypatch):
     monkeypatch.setattr(notifier, "verify_appliances", dummy_verify_appliances)
     monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
 
-    result = await asyncio.wait_for(main_loop(True, appliance_plug_infos), timeout=10)
+    result = await asyncio.wait_for(main_loop(RunMode.SETUP, appliance_plug_infos), timeout=10)
     assert result is True
 
 @pytest.mark.asyncio
@@ -161,7 +164,7 @@ async def test_main_loop_non_setup_mode_no_appliances(monkeypatch):
     monkeypatch.setattr(notifier, "verify_appliances", dummy_verify_appliances)
     monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
 
-    result = await asyncio.wait_for(main_loop(False, []), timeout=10)
+    result = await asyncio.wait_for(main_loop(RunMode.NORMAL, []), timeout=10)
     assert result is False
 
 @pytest.mark.asyncio
@@ -191,5 +194,5 @@ async def test_main_loop_non_setup_mode_with_appliances(monkeypatch):
     monkeypatch.setattr(notifier, "read_config_file", lambda appliances: None)
 
     # pdb.set_trace()
-    result = await asyncio.wait_for(main_loop(False, appliance_plug_infos, 10), timeout=10)
+    result = await asyncio.wait_for(main_loop(RunMode.NORMAL, appliance_plug_infos, 10), timeout=10)
     assert result is True

@@ -39,6 +39,11 @@ DEFAULT_LOGGING_LEVEL = CUSTOM_LEVEL_NUM
 # DEFAULT_LOGGING_LEVEL = logging.INFO
 
 
+class RunMode(Enum):
+    SETUP = 0
+    TEST = 1
+    NORMAL = 2
+
 class ApplianceType(Enum):
     WASHER = 0
     DRYER = 1
@@ -348,7 +353,7 @@ async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Un
     return appliances
 
 
-async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo], max_iterations: int = None) -> bool:
+async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_iterations: int = None, notifier_script: str = None) -> bool:
     iterations = 0
     if len(plug_names) == 0:
         logger.error(f"ERROR, no washer or dryer specified, need at least one")
@@ -358,8 +363,17 @@ async def main_loop(setup_mode: bool, plug_names: list[AppliancePlugInfo], max_i
         logger.error(f"ERROR, no appliances verified")
         return False
     logger.info(f"setup_mode: {setup_mode}, appliances: {repr(appliances)}")
-    if setup_mode:
+    # Handle special run_modes
+    if run_mode == RunMode.SETUP:
         return await setup_loop(appliances)
+    if run_mode == RunMode.TEST:
+        logger.warning(f"main_loop: test_mode, sending notification")
+        pbb.send_notification(f"TEST notification", "FUBAR")
+        if notifier_script is not None:
+            process = await asyncio.create_subprocess_exec("python3", notifier_script)
+            await process.wait()
+        return True
+
     try:
         # main running loop forever
         read_config_file(appliances)
@@ -454,17 +468,6 @@ def init_logging(log_file: str) -> logging.Logger:
         logger.addHandler(handler)
     return logger
 
-# def init_logging(log_file: str) -> logging.Logger:
-#     logger = logging.getLogger(__name__)
-#     logger.setLevel(logging.INFO)
-#     # Create formatter with the specified date format
-#     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-#     logging_handlers = setup_logging_handlers(log_file)
-#     for handler in logging_handlers:
-#         handler.setFormatter(formatter)
-#         logger.addHandler(handler)
-#     return logger
-
 
 def init_argparse() -> argparse.ArgumentParser:
     '''
@@ -512,6 +515,10 @@ def init_argparse() -> argparse.ArgumentParser:
         '-c', '--channel_tag', metavar='',
         help='specifies pushbullet channel tag'
     )
+    parser.add_argument(
+        '-n', '--notifier_script', metavar='',
+        help='user defined script to allow customized notifications'
+    )
     return parser
 
 
@@ -519,6 +526,8 @@ def main() -> None:
     global log_file, logger, setup_mode, access_token, pbb
 
     plugs: list[AppliancePlugInfo] = []
+    notifier_script: str = None
+    run_mode: RunMode = RunMode.NORMAL
 
     parser = init_argparse()
     args = parser.parse_args()
@@ -531,26 +540,28 @@ def main() -> None:
     if args.dryer_plug_name != None:
         plugs.append(AppliancePlugInfo(ApplianceType.DRYER, args.dryer_plug_name))
     if args.setup_mode != None:
+        run_mode = RunMode.SETUP
         setup_mode = args.setup_mode
     if args.access_token != None:
         access_token = args.access_token
     if args.channel_tag != None:
         channel_tag = args.channel_tag
+    if args.notifier_script != None:
+        notifier_script = args.notifier_script
+    if args.test_mode:
+        run_mode = RunMode.TEST
 
     logger = init_logging(log_file)
+
 
     if access_token == None or channel_tag == None:
         logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
     else:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
-    if args.test_mode:
-        logger.warning(f"main: test_mode, sending notification")
-        pbb.send_notification(f"TEST notification", "FUBAR")
-        return
     
     logger.custom(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
-    success = asyncio.run(main_loop(setup_mode, plugs))
-    logger.custom(f'>>>>> FINI <<<<<')
+    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs, notifier_script=notifier_script))
+    logger.custom(f'>>>>> FINI <<<<< success: {success}')
 
 if __name__ == '__main__':
     main()
