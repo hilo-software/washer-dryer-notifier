@@ -541,14 +541,13 @@ def main() -> None:
         plugs.append(AppliancePlugInfo(ApplianceType.DRYER, args.dryer_plug_name))
     if args.setup_mode != None:
         run_mode = RunMode.SETUP
-        setup_mode = args.setup_mode
     if args.access_token != None:
         access_token = args.access_token
     if args.channel_tag != None:
         channel_tag = args.channel_tag
     if args.notifier_script != None:
         notifier_script = args.notifier_script
-    if args.test_mode:
+    if args.test_mode != None:
         run_mode = RunMode.TEST
 
     logger = init_logging(log_file)
@@ -559,7 +558,7 @@ def main() -> None:
     else:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
     
-    logger.custom(f'>>>>> START washer_plug_name: {plugs}, setup_mode: {setup_mode}, pushbullet: {pbb} <<<<<')
+    logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb} <<<<<')
     success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs, notifier_script=notifier_script))
     logger.custom(f'>>>>> FINI <<<<< success: {success}')
 
