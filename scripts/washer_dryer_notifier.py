@@ -540,7 +540,8 @@ def main() -> None:
     if args.dryer_plug_name != None:
         plugs.append(AppliancePlugInfo(ApplianceType.DRYER, args.dryer_plug_name))
     if args.setup_mode != None:
-        run_mode = RunMode.SETUP
+        if args.setup_mode:
+            run_mode = RunMode.SETUP
     if args.access_token != None:
         access_token = args.access_token
     if args.channel_tag != None:
@@ -548,7 +549,8 @@ def main() -> None:
     if args.notifier_script != None:
         notifier_script = args.notifier_script
     if args.test_mode != None:
-        run_mode = RunMode.TEST
+        if args.test_mode:
+            run_mode = RunMode.TEST
 
     logger = init_logging(log_file)
 
