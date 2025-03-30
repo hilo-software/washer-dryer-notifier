@@ -253,14 +253,18 @@ async def turn_on(plug: SmartDevice) -> bool:
 def get_power(plug: SmartDevice) -> float:
     return plug.emeter_realtime.power
 
-def notify_finished(appliance: Appliance) -> None:
+async def notify_finished(appliance: Appliance, notifier_script: str = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
 
     if pbb == None:
         logger.error(f"notify_finished(), no pushbullet specified, will not notify channel")
-        return
-    pbb.send_notification(f"{appliance.get_appliance_name()}", f"FINISHED")
+    else:
+        pbb.send_notification(f"{appliance.get_appliance_name()}", f"FINISHED")
+    if notifier_script is not None:
+        process = await asyncio.create_subprocess_exec("python3", notifier_script)
+        await process.wait()
+
 
 
 def create_config_file(appliances: list[Appliance]) -> None:
@@ -390,8 +394,8 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
                 for appliance in appliances:
                     appliance_state = await appliance.query()
                     if appliance_state == ApplianceMode.FINISHED:
-                        notify_finished(appliance)
                         appliance.set_appliance_mode(ApplianceMode.IDLE)
+                        await notify_finished(appliance, notifier_script)
             except Exception as e:
                 # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
                 retry_ct = retry_ct + 1
@@ -558,6 +562,7 @@ def main() -> None:
     if access_token == None or channel_tag == None:
         logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
     else:
+        logger.info(f"pbb: access_token: {access_token}, channel_tag: {channel_tag}")
         pbb = PushbulletBroadcaster(access_token, channel_tag)
     
     logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb} <<<<<')
