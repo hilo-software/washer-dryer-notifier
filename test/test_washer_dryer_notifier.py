@@ -16,6 +16,10 @@ from scripts.washer_dryer_notifier import (
 from unittest.mock import MagicMock
 import scripts.washer_dryer_notifier as notifier
 import pdb
+import os
+import glob
+from logging.handlers import TimedRotatingFileHandler
+
 
 # --- Extend dummy_logger with a custom method --- #
 CUSTOM_LEVEL_NUM = 25
@@ -237,3 +241,34 @@ async def test_main_loop_non_setup_mode_with_appliances(monkeypatch):
     # pdb.set_trace()
     result = await asyncio.wait_for(main_loop(RunMode.NORMAL, appliance_plug_infos, 10), timeout=10)
     assert result is True
+
+def test_setup_logging_handlers_returns_timed_rotating_file_handler(tmp_path):
+    # Create a temporary log file path
+    log_file = str(tmp_path / "test.log")
+    handlers = notifier.setup_logging_handlers(log_file)
+    found = False
+    for handler in handlers:
+        if isinstance(handler, TimedRotatingFileHandler):
+            found = True
+            # Verify that the backupCount is set to 5
+            assert handler.backupCount == 5, "Backup count is not 5"
+    assert found, "TimedRotatingFileHandler not found among logging handlers"
+
+def test_logging_file_rotation(tmp_path):
+    # Use the temporary log file
+    log_file = str(tmp_path / "test.log")
+    logger_instance = notifier.init_logging(log_file)
+    
+    # Log a couple of messages
+    logger_instance.info("Test log message 1")
+    logger_instance.info("Test log message 2")
+    
+    # Find the TimedRotatingFileHandler and force a rollover
+    for handler in logger_instance.handlers:
+        if isinstance(handler, TimedRotatingFileHandler):
+            # Force the rollover
+            handler.doRollover()
+    
+    # Look for backup log files. TimedRotatingFileHandler names them with a suffix.
+    backup_files = glob.glob(log_file + ".*")
+    assert len(backup_files) > 0, "No backup log files created after rollover"
