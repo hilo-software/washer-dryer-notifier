@@ -13,7 +13,7 @@ from scripts.washer_dryer_notifier import (
     main_loop,
     pbb,
 )
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 import scripts.washer_dryer_notifier as notifier
 import pdb
 
@@ -159,7 +159,7 @@ async def test_main_loop_test_mode(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
 
     # Mock PushbulletBroadcaster and set it as the global `pbb`
-    mock_pbb = AsyncMock()
+    mock_pbb = MagicMock()
     monkeypatch.setattr(notifier, "pbb", mock_pbb)
 
     dummy_washer_device = DummySmartDevice(alias="washer", power=1.0, is_on=True)
