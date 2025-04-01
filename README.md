@@ -40,10 +40,19 @@ $ ./scripts/washer_dryer_notifier.py -w washer -d dryer -a "<Pushbullet api key>
 ```
 
 - This will run the script in continuous mode as described above.
+### Notifiers
+#### Built in Pushbullet support
+- Support for Pushbullet is built in.
+  - Requires use of Pushbullet api, access token, channel
+#### Custom Notifier script support
+- Customized notifier scripts can be run to do things like blink lights, etc.
+- The notifier script will be run in a python subprocess
 #### Command line args
 ```
 $ ./scripts/washer_dryer_notifier.py -h
-/home/kelvin/sandbox/projects/washer_dryer_notifier/./scripts/washer_dryer_notifier.py:4: usage: washer_dryer_notifier.py [OPTIONS]
+/home/kelvin/sandbox/projects/washer_dryer_notifier/./scripts/washer_dryer_notifier.py:4: DeprecationWarning: SmartDevice is deprecated, use IotDevice from package kasa.iot instead or use Discover.discover_single() and Device.connect() to support new protocols
+  from kasa import Discover, SmartDevice
+usage: washer_dryer_notifier.py [OPTIONS]
 
 Notify when washer, dryer finishes
 
@@ -51,6 +60,7 @@ options:
   -h, --help            show this help message and exit
   -v, --version         show program's version number and exit
   -s, --setup_mode      setup mode, detect voltage levels and create config file
+  -t, --test_mode       test mode, send pushbullet broadcast test
   -w , --washer_plug_name 
                         specifies washer plug name
   -d , --dryer_plug_name 
@@ -59,4 +69,6 @@ options:
                         specifies custom log file name
   -a , --access_token   specifies pushbullet access token
   -c , --channel_tag    specifies pushbullet channel tag
+  -n , --notifier_script 
+                        user defined script to allow customized notifications
 ```
