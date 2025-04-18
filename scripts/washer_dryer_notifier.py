@@ -384,8 +384,13 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
         read_config_file(appliances)
         
         retry_ct = 0
+        error_detected = False
         while retry_ct < RETRY_MAX:
             logger.info(f"main_loop: LOOP TOP")
+            # Reset retry_ct if last pass through loop was successful
+            if not error_detected:
+                retry_ct = 0
+            error_detected = False
             # Testability code
             if max_iterations is not None:
                 iterations += 1
@@ -400,6 +405,7 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
             except Exception as e:
                 # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
                 retry_ct = retry_ct + 1
+                error_detected = True
                 logger.error(f'ERROR, unexpected exit from main_loop: {e}, retry_ct: {retry_ct}')
                 await asyncio.sleep(RETRY_SLEEP_DELAY)
             await asyncio.sleep(PROBE_INTERVAL_SECS)
