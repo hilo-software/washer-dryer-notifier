@@ -400,13 +400,13 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
                 for appliance in appliances:
                     appliance_state = await appliance.query()
                     if appliance_state == ApplianceMode.FINISHED:
-                        appliance.set_appliance_mode(ApplianceMode.IDLE)
                         await notify_finished(appliance, notifier_script)
+                        appliance.set_appliance_mode(ApplianceMode.IDLE)
             except Exception as e:
                 # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
                 retry_ct = retry_ct + 1
                 error_detected = True
-                logger.error(f'ERROR, unexpected exit from main_loop: {e}, retry_ct: {retry_ct}')
+                logger.error(f'ERROR, unexpected exception in main_loop: {e}, retry_ct: {retry_ct}')
                 await asyncio.sleep(RETRY_SLEEP_DELAY)
             await asyncio.sleep(PROBE_INTERVAL_SECS)
         return True
