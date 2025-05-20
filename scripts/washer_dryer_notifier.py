@@ -2,6 +2,8 @@
 
 import asyncio
 from kasa import Discover, SmartDevice
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, timedelta
 import logging
 import argparse
@@ -117,6 +119,12 @@ class AppliancePlug():
     def __repr__(self):
         return (f"AppliancePlug(info={repr(self.appliance_plug_info)}, "
                 f"plug={self.appliance_plug})")
+
+
+@dataclass
+class EmailContext():
+    email: str
+    app_key: str
 
 
 class Appliance():
@@ -254,7 +262,54 @@ async def turn_on(plug: SmartDevice) -> bool:
 def get_power(plug: SmartDevice) -> float:
     return plug.emeter_realtime.power
 
-async def notify_finished(appliance: Appliance, notifier_script: str = None) -> None:
+
+def send(from_addr: str, to_addr: str, app_key: str, msg: EmailMessage) -> None:
+    '''
+    Constructs and sends email of log via SMTP for gmail.
+    Must have an app_key
+    Interested in different email, rewrite this.
+
+    Args:
+        from_addr (_type_): _description_
+        to_addr (_type_): _description_
+        app_key (_type_): _description_
+        msg (_type_): _description_
+    '''
+    try:
+        logger.info(f'[EMAIL] send')
+        smtpobj = smtplib.SMTP('smtp.gmail.com', 587)
+        smtpobj.ehlo()
+        smtpobj.starttls()
+        smtpobj.ehlo()
+        smtpobj.login(from_addr, app_key)
+        smtpobj.sendmail(from_addr, to_addr, msg.as_string())
+        smtpobj.close()
+        logger.info(f'[EMAIL] sent')
+    except smtplib.SMTPException as e:
+        logger.error(f'MAIL SMTP ERROR: Unable to send mail: {str(e)}')
+    except Exception as e:
+        logger.error(f'MAIL General ERROR: Unexpected Exception in send: Unable to send mail: {str(e)}')
+
+
+def send_my_mail(email: str, app_key: str, appliance: Appliance) -> None:
+    if email == None or app_key == None:
+        print('Email args missing not sending')
+    else:
+        logger.info(f'[EMAIL] send_my_mail')
+        # Create a text/plain message
+        msg = EmailMessage()
+
+        msg.set_content(f"{appliance.get_appliance_name} is FINISHED")
+
+        # me == the sender's email address
+        # you == the recipient's email address
+        msg['Subject'] = f'washer dryer notifier'
+        msg['From'] = f'{email}'
+        msg['To'] = f'{email}'
+        send(email, email, app_key, msg)
+
+
+async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
 
@@ -262,6 +317,8 @@ async def notify_finished(appliance: Appliance, notifier_script: str = None) -> 
         logger.error(f"notify_finished(), no pushbullet specified, will not notify channel")
     else:
         pbb.send_notification(f"{appliance.get_appliance_name()}", f"FINISHED")
+        if email_context != None:
+            send_my_mail(email_context.email, email_context.app_key, appliance)
     if notifier_script is not None:
         process = await asyncio.create_subprocess_exec("python3", notifier_script)
         await process.wait()
@@ -358,7 +415,7 @@ async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Un
     return appliances
 
 
-async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_iterations: int = None, notifier_script: str = None) -> bool:
+async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_iterations: int = None, notifier_script: str = None, email_context = None) -> bool:
     iterations = 0
     if len(plug_names) == 0:
         logger.error(f"ERROR, no washer or dryer specified, need at least one")
@@ -400,7 +457,7 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
                 for appliance in appliances:
                     appliance_state = await appliance.query()
                     if appliance_state == ApplianceMode.FINISHED:
-                        await notify_finished(appliance, notifier_script)
+                        await notify_finished(appliance, notifier_script, email_context=email_context)
                         appliance.set_appliance_mode(ApplianceMode.IDLE)
             except Exception as e:
                 # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
@@ -528,6 +585,14 @@ def init_argparse() -> argparse.ArgumentParser:
         '-n', '--notifier_script', metavar='',
         help='user defined script to allow customized notifications'
     )
+    parser.add_argument(
+        "-e", "--email", metavar='',
+        help='email address to send reports to'
+    )
+    parser.add_argument(
+        '-k', '--app_key', metavar='',
+        help='Google app key needed to allow sending mail reports [gmail only]'
+    )
     return parser
 
 
@@ -537,6 +602,7 @@ def main() -> None:
     plugs: list[AppliancePlugInfo] = []
     notifier_script: str = None
     run_mode: RunMode = RunMode.NORMAL
+    email_context: EmailContext = None
 
     parser = init_argparse()
     args = parser.parse_args()
@@ -557,6 +623,8 @@ def main() -> None:
         channel_tag = args.channel_tag
     if args.notifier_script != None:
         notifier_script = args.notifier_script
+    if args.email != None and args.app_key != None:
+        email_context = EmailContext(args.email, args.app_key)
     if args.test_mode != None:
         if args.test_mode:
             run_mode = RunMode.TEST
@@ -571,7 +639,7 @@ def main() -> None:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
     
     logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb} <<<<<')
-    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs, notifier_script=notifier_script))
+    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs, notifier_script=notifier_script, email_context=email_context,))
     logger.custom(f'>>>>> FINI <<<<< success: {success}')
 
 if __name__ == '__main__':
