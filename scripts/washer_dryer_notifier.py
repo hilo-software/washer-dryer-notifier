@@ -265,52 +265,6 @@ def get_power(plug: SmartDevice) -> float:
     return plug.emeter_realtime.power
 
 
-# def send(from_addr: str, to_addr: str, app_key: str, msg: EmailMessage) -> None:
-#     '''
-#     Constructs and sends email of log via SMTP for gmail.
-#     Must have an app_key
-#     Interested in different email, rewrite this.
-
-#     Args:
-#         from_addr (_type_): _description_
-#         to_addr (_type_): _description_
-#         app_key (_type_): _description_
-#         msg (_type_): _description_
-#     '''
-#     try:
-#         logger.info(f'[EMAIL] send')
-#         smtpobj = smtplib.SMTP('smtp.gmail.com', 587)
-#         smtpobj.ehlo()
-#         smtpobj.starttls()
-#         smtpobj.ehlo()
-#         smtpobj.login(from_addr, app_key)
-#         smtpobj.sendmail(from_addr, to_addr, msg.as_string())
-#         smtpobj.close()
-#         logger.info(f'[EMAIL] sent')
-#     except smtplib.SMTPException as e:
-#         logger.error(f'MAIL SMTP ERROR: Unable to send mail: {str(e)}')
-#     except Exception as e:
-#         logger.error(f'MAIL General ERROR: Unexpected Exception in send: Unable to send mail: {str(e)}')
-
-
-# def send_my_mail(email: str, app_key: str, appliance: Appliance) -> None:
-#     if email == None or app_key == None:
-#         print('Email args missing not sending')
-#     else:
-#         logger.info(f'[EMAIL] send_my_mail')
-#         # Create a text/plain message
-#         msg = EmailMessage()
-
-#         msg.set_content(f"{appliance.get_appliance_name} is FINISHED")
-
-#         # me == the sender's email address
-#         # you == the recipient's email address
-#         msg['Subject'] = f'washer dryer notifier'
-#         msg['From'] = f'{email}'
-#         msg['To'] = f'{email}'
-#         # send_text_email(email=email, app_key=app_key, subject='washer dryer notifier', content=f"{appliance.get_appliance_name} is FINISHED")
-
-
 async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
