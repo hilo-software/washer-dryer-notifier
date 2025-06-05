@@ -21,6 +21,7 @@ import inspect
 import requests
 from logging.handlers import TimedRotatingFileHandler
 from hilo_software_utilities.send_mail import send_text_email
+from hilo_software_utilities.custom_logger import init_logging
 
 APP_TAG = "washer dryer notifier"
 LOG_FILE = "washer_dryer_notifier.log"
@@ -38,10 +39,6 @@ PUSHBULLET_CHANNEL_TAG = "washer_dryer_notifier"
 INIT_TIMEOUT = 30
 UPDATE_TIMEOUT = 10
 TURN_ON_TIMEOUT = 10
-CUSTOM_LEVEL_NUM = 25
-CUSTOM_LEVEL_NAME = "CUSTOM"
-DEFAULT_LOGGING_LEVEL = CUSTOM_LEVEL_NUM
-# DEFAULT_LOGGING_LEVEL = logging.INFO
 
 
 class RunMode(Enum):
@@ -429,69 +426,6 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
     except Exception as e:
         logger.error(f"main_loop Exception: {e}")
     return False
-
-def setup_logging_handlers(log_file: str) -> list:
-    try:
-        # Rotate logs every day (when='D') and keep the last 5 days (backupCount=5)
-        logging_file_handler = TimedRotatingFileHandler(log_file, when='D', interval=1, backupCount=5)
-    except (IOError, OSError, ValueError, FileNotFoundError) as e:
-        print(f'ERROR -- Could not create logging file: {log_file}, e: {str(e)}')
-        logging_handlers = [
-            logging.StreamHandler()
-        ]
-        return logging_handlers
-    except Exception as e:
-        print(f'ERROR -- Unexpected Exception: Could not create logging file: {log_file}, e: {str(e)}')
-        logging_handlers = [
-            logging.StreamHandler()
-        ]
-        return logging_handlers
-
-    logging_handlers = [
-        logging_file_handler,
-        logging.StreamHandler()
-    ]
-    return logging_handlers
-
-# Define formats
-default_format = "%(asctime)s %(levelname)s: %(message)s"
-info_format = "%(message)s"
-custom_format = "%(asctime)s CUSTOM: %(message)s"
-
-def custom(self, message, *args, **kws):
-    if self.isEnabledFor(CUSTOM_LEVEL_NUM):
-        self._log(CUSTOM_LEVEL_NUM, message, args, **kws)
-
-class CustomFormatter(logging.Formatter):
-    def __init__(self, fmt=None, datefmt=None, info_fmt=None, custom_fmt=None, *args, **kwargs):
-        super().__init__(fmt, datefmt, *args, **kwargs)
-        self.default_fmt = fmt
-        self.info_fmt = info_fmt
-        self.custom_fmt = custom_fmt
-
-    def format(self, record):
-        # Use different format for INFO level
-        if record.levelno == logging.INFO:
-            self._style._fmt = self.info_fmt
-        # Use different format for CUSTOM level
-        elif record.levelno == CUSTOM_LEVEL_NUM:
-            self._style._fmt = self.custom_fmt
-            record.levelname = CUSTOM_LEVEL_NAME  # Ensure the custom level name is used
-        else:
-            self._style._fmt = self.default_fmt
-        return super().format(record)
-
-def init_logging(log_file: str) -> logging.Logger:
-    logging.addLevelName(CUSTOM_LEVEL_NUM, CUSTOM_LEVEL_NAME)
-    logging.Logger.custom = custom
-    logger = logging.getLogger('')
-    logger.setLevel(DEFAULT_LOGGING_LEVEL)
-    formatter = CustomFormatter(fmt=default_format, info_fmt=info_format, custom_fmt=custom_format, datefmt="%Y-%m-%d %H:%M:%S")
-    logging_handlers = setup_logging_handlers(log_file)
-    for handler in logging_handlers:
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    return logger
 
 
 def init_argparse() -> argparse.ArgumentParser:
