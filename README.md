@@ -41,6 +41,9 @@ $ ./scripts/washer_dryer_notifier.py -w washer -d dryer -a "<Pushbullet api key>
 
 - This will run the script in continuous mode as described above.
 ### Notifiers
+#### Built in gmail notify support
+- Support for sending email notifications.
+- Requires user to have a valid Google app key
 #### Built in Pushbullet support
 - Support for Pushbullet is built in.
   - Requires use of Pushbullet api, access token, channel
@@ -71,4 +74,6 @@ options:
   -c , --channel_tag    specifies pushbullet channel tag
   -n , --notifier_script 
                         user defined script to allow customized notifications
+  -e , --email          email address to send reports to
+  -k , --app_key        Google app key needed to allow sending mail reports [gmail only]
 ```
