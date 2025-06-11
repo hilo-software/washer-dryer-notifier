@@ -266,15 +266,13 @@ async def notify_finished(appliance: Appliance, notifier_script: str = None, ema
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
 
-    if pbb == None:
-        logger.error(f"notify_finished(), no pushbullet specified, will not notify channel")
-    else:
+    if pbb != None:
         msg_status: str = " => FINISHED"
         msg_title: str = f"{APP_TAG}: {appliance.get_appliance_name()}"
         msg_string: str = f"{msg_title}{msg_status}"
         pbb.send_notification(title=msg_title, message=msg_status)
-        if email_context != None:
-            send_text_email(email=email_context.email, app_key=email_context.app_key, subject=APP_TAG, content=msg_string)
+    if email_context != None:
+        send_text_email(email=email_context.email, app_key=email_context.app_key, subject=APP_TAG, content=msg_string)
     if notifier_script is not None:
         process = await asyncio.create_subprocess_exec("python3", notifier_script)
         await process.wait()
