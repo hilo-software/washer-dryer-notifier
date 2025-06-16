@@ -265,11 +265,11 @@ def get_power(plug: SmartDevice) -> float:
 async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
+    msg_status: str = " => FINISHED"
+    msg_title: str = f"{APP_TAG}: {appliance.get_appliance_name()}"
+    msg_string: str = f"{msg_title}{msg_status}"
 
     if pbb != None:
-        msg_status: str = " => FINISHED"
-        msg_title: str = f"{APP_TAG}: {appliance.get_appliance_name()}"
-        msg_string: str = f"{msg_title}{msg_status}"
         pbb.send_notification(title=msg_title, message=msg_status)
     if email_context != None:
         send_text_email(email=email_context.email, app_key=email_context.app_key, subject=APP_TAG, content=msg_string)
