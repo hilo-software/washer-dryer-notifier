@@ -4,7 +4,7 @@ import asyncio
 from kasa import Discover, SmartDevice
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import logging
 import argparse
 from typing import Set, Union, ForwardRef, Dict, List, Optional
@@ -89,7 +89,6 @@ class PushbulletBroadcaster:
             "channel_tag": self.channel_tag
         }
 
-        # response = requests.post("https://api.pushbullet.com/v2/pushes", json=payload, headers=self.headers)
         response = PushbulletBroadcaster.post_bullet(payload, self.headers)
 
         if response.status_code == 200:
@@ -212,9 +211,28 @@ appliances: [] = []
 setup_mode: bool = False
 access_token: str = None
 pbb: PushbulletBroadcaster = None
+block_window: Optional[tuple] = None
+
 
 def fn_name():
     return inspect.currentframe().f_back.f_code.co_name
+
+
+def is_within_block(start: str, stop: str) -> bool:
+    """Return True if current time falls within [start, stop)."""
+    try:
+        now = datetime.now().time()
+        start_t = datetime.strptime(start, "%H:%M").time()
+        stop_t = datetime.strptime(stop, "%H:%M").time()
+
+        if start_t <= stop_t:
+            return start_t <= now < stop_t
+        else:
+            # Handles overnight wrap (e.g. 22:00–06:00)
+            return now >= start_t or now < stop_t
+    except Exception as e:
+        logger.error(f"is_within_block parse error: {e}")
+        return False
 
 
 async def init_plugs(target_plug_infos: list[AppliancePlugInfo]) -> list[AppliancePlug]:
@@ -265,6 +283,12 @@ def get_power(plug: SmartDevice) -> float:
 async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
+
+    # Suppress notification if within block window
+    if block_window and is_within_block(*block_window):
+        logger.custom(f"⏸ Notification suppressed (block window) for {appliance.get_appliance_name()}")
+        return
+
     msg_status: str = " => FINISHED"
     msg_title: str = f"{APP_TAG}: {appliance.get_appliance_name()}"
     msg_string: str = f"{msg_title}{msg_status}"
@@ -272,7 +296,8 @@ async def notify_finished(appliance: Appliance, notifier_script: str = None, ema
     if pbb != None:
         pbb.send_notification(title=msg_title, message=msg_status)
     if email_context != None:
-        send_text_email(email=email_context.email, app_key=email_context.app_key, subject=APP_TAG, content=msg_string)
+        send_text_email(email=email_context.email, app_key=email_context.app_key,
+                        subject=APP_TAG, content=msg_string)
     if notifier_script is not None:
         process = await asyncio.create_subprocess_exec("python3", notifier_script)
         await process.wait()
@@ -300,7 +325,7 @@ def read_config_file(appliances: list[Appliance]) -> Union[None, Exception]:
             appliance.set_appliance_running_power = config[section_name][RUNNING_TAG]
     except Exception as e:
         msg = f"Exception in read_config_file: {e}"
-        logger.error(f"Exception in read_config_file: {e}")
+        logger.error(msg)
         raise Exception(msg)
 
 
@@ -339,16 +364,16 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
                 else:
                     appliance.set_appliance_running_power(running_power)
         if running_power_set:
-            logger.custom(f"We have set the RUNNING power for the appliance(s)")
+            logger.custom("Running power set for appliance(s)")
             break
 
-        logger.warning(f"At least one appliance failed to detect a valid RUNNING voltage, retry_count: {retry_count}")
+        logger.warning(f"Failed to detect RUNNING power, retry {retry_count}")
         running_power_set = True
         retry_count += 1
         await asyncio.sleep(SETUP_PROBE_INTERVAL_SECS)
         elapsed_seconds += SETUP_PROBE_INTERVAL_SECS
         if elapsed_seconds > retry_seconds_max:
-            logger.error(f"UNABLE to set running power in one or more appliances: {repr(appliances)}")
+            logger.error(f"UNABLE to set running power in one or more appliances")
             break
     logger.custom(f"setup_loop: running_power_set: {running_power_set}, retry_count: {retry_count}, elapsed_seconds: {elapsed_seconds}")
     #  if successful, create a config file
@@ -369,22 +394,24 @@ async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Un
     return appliances
 
 
-async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_iterations: int = None, notifier_script: str = None, email_context = None) -> bool:
+async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo],
+                    max_iterations: int = None, notifier_script: str = None,
+                    email_context=None, block_window=None) -> bool:
     iterations = 0
     if len(plug_names) == 0:
-        logger.error(f"ERROR, no washer or dryer specified, need at least one")
+        logger.error(f"No washer/dryer specified")
         return False
     appliances = await verify_appliances(plug_names)
     if len(appliances) == 0:
-        logger.error(f"ERROR, no appliances verified")
+        logger.error(f"No appliances verified")
         return False
     logger.info(f"setup_mode: {setup_mode}, appliances: {repr(appliances)}")
     # Handle special run_modes
     if run_mode == RunMode.SETUP:
         return await setup_loop(appliances)
     if run_mode == RunMode.TEST:
-        logger.warning(f"main_loop: test_mode, sending notification")
-        pbb.send_notification(f"TEST notification", "FUBAR")
+        logger.warning(f"test_mode, sending notification")
+        pbb.send_notification("TEST notification", "FUBAR")
         if notifier_script is not None:
             process = await asyncio.create_subprocess_exec("python3", notifier_script)
             await process.wait()
@@ -393,7 +420,6 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
     try:
         # main running loop forever
         read_config_file(appliances)
-        
         retry_ct = 0
         error_detected = False
         while retry_ct < RETRY_MAX:
@@ -411,13 +437,15 @@ async def main_loop(run_mode: RunMode, plug_names: list[AppliancePlugInfo], max_
                 for appliance in appliances:
                     appliance_state = await appliance.query()
                     if appliance_state == ApplianceMode.FINISHED:
-                        await notify_finished(appliance, notifier_script, email_context=email_context)
+                        await notify_finished(appliance, notifier_script,
+                                              email_context=email_context,
+                                              block_window=block_window)
                         appliance.set_appliance_mode(ApplianceMode.IDLE)
             except Exception as e:
                 # Treat this as a network issue, retry after sleep up to RETRY_MAX attempts
                 retry_ct = retry_ct + 1
                 error_detected = True
-                logger.error(f'ERROR, unexpected exception in main_loop: {e}, retry_ct: {retry_ct}')
+                logger.error(f'Unexpected exception in main_loop: {e}, retry_ct: {retry_ct}')
                 await asyncio.sleep(RETRY_SLEEP_DELAY)
             await asyncio.sleep(PROBE_INTERVAL_SECS)
         return True
@@ -438,57 +466,37 @@ def init_argparse() -> argparse.ArgumentParser:
         usage='%(prog)s [OPTIONS]',
         description='Notify when washer, dryer finishes'
     )
+    parser.add_argument('-v', '--version', action='version',
+                        version=f'%(prog)s version 1.0.0')
+    parser.add_argument('-s', '--setup_mode', action='store_true',
+                        help='setup mode, detect voltage levels and create config file')
+    parser.add_argument('-t', '--test_mode', action='store_true',
+                        help='test mode, send pushbullet broadcast test')
+    parser.add_argument('-w', '--washer_plug_name', metavar='',
+                        help='specifies washer plug name')
+    parser.add_argument('-d', '--dryer_plug_name', metavar='',
+                        help='specifies dryer plug name')
+    parser.add_argument('-l', '--log_file_name', metavar='',
+                        help='specifies custom log file name')
+    parser.add_argument('-a', '--access_token', metavar='',
+                        help='specifies pushbullet access token')
+    parser.add_argument('-c', '--channel_tag', metavar='',
+                        help='specifies pushbullet channel tag')
+    parser.add_argument('-n', '--notifier_script', metavar='',
+                        help='user defined script for custom notifications')
+    parser.add_argument("-e", "--email", metavar='',
+                        help='email address to send reports to')
+    parser.add_argument('-k', '--app_key', metavar='',
+                        help='Google app key for gmail reports')
     parser.add_argument(
-        '-v', '--version', action='version',
-        version=f'{parser.prog} version 1.0.0'
-    )
-    parser.add_argument(
-        '-s', '--setup_mode',
-        action='store_true',
-        help='setup mode, detect voltage levels and create config file'
-    )
-    parser.add_argument(
-        '-t', '--test_mode',
-        action='store_true',
-        help='test mode, send pushbullet broadcast test'
-    )
-    parser.add_argument(
-        '-w', '--washer_plug_name', metavar='',
-        help='specifies washer plug name'
-    )
-    parser.add_argument(
-        '-d', '--dryer_plug_name', metavar='',
-        help='specifies dryer plug name'
-    )
-    parser.add_argument(
-        '-l', '--log_file_name', metavar='',
-        help='specifies custom log file name'
-    )
-    parser.add_argument(
-        '-a', '--access_token', metavar='',
-        help='specifies pushbullet access token'
-    )
-    parser.add_argument(
-        '-c', '--channel_tag', metavar='',
-        help='specifies pushbullet channel tag'
-    )
-    parser.add_argument(
-        '-n', '--notifier_script', metavar='',
-        help='user defined script to allow customized notifications'
-    )
-    parser.add_argument(
-        "-e", "--email", metavar='',
-        help='email address to send reports to'
-    )
-    parser.add_argument(
-        '-k', '--app_key', metavar='',
-        help='Google app key needed to allow sending mail reports [gmail only]'
+        '-b', '--block_time', nargs=2, metavar=('START', 'STOP'),
+        help='time window in 24h HH:MM HH:MM format to suppress notifications'
     )
     return parser
 
 
 def main() -> None:
-    global log_file, logger, setup_mode, access_token, pbb
+    global log_file, logger, setup_mode, access_token, pbb, block_window
 
     plugs: list[AppliancePlugInfo] = []
     notifier_script: str = None
@@ -501,37 +509,42 @@ def main() -> None:
     # set up default logging
     if args.log_file_name != None:
         log_file = args.log_file_name
-    if args.washer_plug_name != None:
+    if args.washer_plug_name:
         plugs.append(AppliancePlugInfo(ApplianceType.WASHER, args.washer_plug_name))
-    if args.dryer_plug_name != None:
+    if args.dryer_plug_name:
         plugs.append(AppliancePlugInfo(ApplianceType.DRYER, args.dryer_plug_name))
-    if args.setup_mode != None:
-        if args.setup_mode:
-            run_mode = RunMode.SETUP
-    if args.access_token != None:
+    if args.setup_mode:
+        run_mode = RunMode.SETUP
+    if args.access_token:
         access_token = args.access_token
-    if args.channel_tag != None:
+    if args.channel_tag:
         channel_tag = args.channel_tag
-    if args.notifier_script != None:
+    else:
+        channel_tag = None
+    if args.notifier_script:
         notifier_script = args.notifier_script
-    if args.email != None and args.app_key != None:
+    if args.email and args.app_key:
         email_context = EmailContext(args.email, args.app_key)
-    if args.test_mode != None:
-        if args.test_mode:
-            run_mode = RunMode.TEST
+    if args.test_mode:
+        run_mode = RunMode.TEST
+    if args.block_time:
+        block_window = args.block_time
 
     logger = init_logging(log_file)
 
-
-    if access_token == None or channel_tag == None:
-        logger.warning(f"main: no access_token and/or channel_token, cannot send pushbullet notifications")
+    if access_token is None or channel_tag is None:
+        logger.warning("No access_token/channel_tag, cannot send pushbullet notifications")
     else:
         logger.info(f"pbb: access_token: {access_token}, channel_tag: {channel_tag}")
         pbb = PushbulletBroadcaster(access_token, channel_tag)
     
-    logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb} <<<<<')
-    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs, notifier_script=notifier_script, email_context=email_context,))
+    logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb}, block_window: {block_window} <<<<<')
+    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs,
+                                    notifier_script=notifier_script,
+                                    email_context=email_context,
+                                    block_window=block_window))
     logger.custom(f'>>>>> FINI <<<<< success: {success}')
+
 
 if __name__ == '__main__':
     main()
