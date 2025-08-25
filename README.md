@@ -76,4 +76,6 @@ options:
                         user defined script to allow customized notifications
   -e , --email          email address to send reports to
   -k , --app_key        Google app key needed to allow sending mail reports [gmail only]
+  -b START STOP, --block_time START STOP
+                        time window in 24h HH:MM HH:MM format to suppress notifications
 ```
