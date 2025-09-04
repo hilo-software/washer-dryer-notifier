@@ -280,7 +280,7 @@ def get_power(plug: SmartDevice) -> float:
     return plug.emeter_realtime.power
 
 
-async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None) -> None:
+async def notify_finished(appliance: Appliance, notifier_script: str = None, email_context = None, block_window = None) -> None:
     global pbb
     logger.custom(f"notify_finished: appliance: {appliance.get_appliance_name()}")
 
