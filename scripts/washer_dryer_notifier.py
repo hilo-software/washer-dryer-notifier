@@ -494,6 +494,44 @@ def init_argparse() -> argparse.ArgumentParser:
     )
     return parser
 
+import contextlib
+
+async def async_main(run_mode, plugs, notifier_script, email_context, block_window):
+    """Wraps main_loop with graceful signal handling."""
+    stop_event = asyncio.Event()
+
+    def handle_stop_signal():
+        logger.warning("🛑 Received stop signal (SIGTERM or SIGINT). Shutting down gracefully...")
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, handle_stop_signal)
+
+    # Run your main loop in a background task so we can cancel it
+    main_task = asyncio.create_task(
+        main_loop(run_mode=run_mode, plug_names=plugs,
+                  notifier_script=notifier_script,
+                  email_context=email_context,
+                  block_window=block_window)
+    )
+
+    # Wait until either the stop signal arrives or main_task finishes
+    done, pending = await asyncio.wait(
+        {main_task, asyncio.create_task(stop_event.wait())},
+        return_when=asyncio.FIRST_COMPLETED
+    )
+
+    if stop_event.is_set():
+        logger.info("Cancelling main task...")
+        main_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await main_task
+
+    logger.info("✅ Shutdown complete.")
+    return True
+
 
 def main() -> None:
     global log_file, logger, setup_mode, access_token, pbb, block_window
@@ -506,7 +544,7 @@ def main() -> None:
     parser = init_argparse()
     args = parser.parse_args()
 
-    # set up default logging
+    # logging setup and argument parsing as before...
     if args.log_file_name != None:
         log_file = args.log_file_name
     if args.washer_plug_name:
@@ -539,12 +577,16 @@ def main() -> None:
         pbb = PushbulletBroadcaster(access_token, channel_tag)
     
     logger.custom(f'>>>>> START washer_plug_name: {plugs}, run_mode: {run_mode}, pushbullet: {pbb}, block_window: {block_window} <<<<<')
-    success = asyncio.run(main_loop(run_mode=run_mode, plug_names=plugs,
-                                    notifier_script=notifier_script,
-                                    email_context=email_context,
-                                    block_window=block_window))
+
+    try:
+        success = asyncio.run(async_main(run_mode, plugs, notifier_script, email_context, block_window))
+    except Exception as e:
+        logger.error(f"Exception in async_main: {e}")
+        success = False
+
     logger.custom(f'>>>>> FINI <<<<< success: {success}')
 
 
 if __name__ == '__main__':
     main()
+
