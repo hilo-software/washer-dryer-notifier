@@ -1,0 +1,58 @@
+# Install in /etc/systemd/system/washer_dryer_notifier.service
+#
+# launch
+# sudo systemctl daemon-reload
+# sudo systemctl enable washer_dryer_notifier.service
+# sudo systemctl start washer_dryer_notifier.service
+#
+# verify
+# systemctl status washer_dryer_notifier.service
+#
+# view output
+# - one time: sudo usermod -aG systemd-journal kelvin
+# Then
+# sudo journalctl -u washer_dryer_notifier.service -f
+
+
+
+
+[Unit]
+Description=Washer Dryer Notifier
+After=network.target
+
+[Service]
+Type=simple
+# Main entry script
+ExecStart=/usr/bin/python3 washer_dryer_notifier.py \
+  -w washer \
+  -d dryer \
+  -n notify_wrapper.py \
+  -e your_email@gmail.com \
+  -k your_app_token \
+  -b 22:00 06:00
+
+# Run in your sandbox so relative imports and paths work
+WorkingDirectory=/home/kelvin/sandbox
+
+# Restart automatically if the script crashes
+Restart=always
+RestartSec=5
+
+# Run as your normal user
+User=kelvin
+
+# Add your home directory to Python path so imports work cleanly
+Environment="PYTHONPATH=/home/kelvin/sandbox"
+
+# Choose ONE of the following logging methods ↓↓↓
+
+# Option 1: Use systemd journal (recommended)
+StandardOutput=journal
+StandardError=journal
+
+# Option 2: Or log to files (uncomment if preferred)
+# StandardOutput=append:/home/your_user/sandbox/washer_dryer.log
+# StandardError=append:/home/your_user/sandbox/washer_dryer_error.log
+
+[Install]
+WantedBy=multi-user.target
