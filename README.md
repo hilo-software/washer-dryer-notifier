@@ -38,8 +38,16 @@ $ ./scripts/washer_dryer_notifier.py -s -w washer -d dryer
 ```
 $ ./scripts/washer_dryer_notifier.py -w washer -d dryer -a "<Pushbullet api key>" -c <Pushbullet channel>
 ```
-
 - This will run the script in continuous mode as described above.
+### Linux Service run
+- A sample service file is available in the service directory: washer_dryer_notifier.service
+- We assume that all necessary scripts are in the same directory as the main washer_dryer_notifier.py script.
+```
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable washer_dryer_notifier.service
+$ sudo systemctl start washer_dryer_notifier.service
+$ sudo systemctl status washer_dryer_notifier.service
+```
 ### Notifiers
 #### Built in gmail notify support
 - Support for sending email notifications.
