@@ -299,7 +299,10 @@ async def notify_finished(appliance: Appliance, notifier_script: str = None, ema
         send_text_email(email=email_context.email, app_key=email_context.app_key,
                         subject=APP_TAG, content=msg_string)
     if notifier_script is not None:
-        process = await asyncio.create_subprocess_exec("python3", notifier_script)
+        if appliance.get_appliance_name() == "dryer":
+            process = await asyncio.create_subprocess_exec("python3", notifier_script, "-d")
+        else:
+            process = await asyncio.create_subprocess_exec("python3", notifier_script)
         await process.wait()
 
 
