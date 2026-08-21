@@ -348,6 +348,8 @@ async def setup_loop(appliances: list[Appliance]) -> bool:
     # Assume we start in idle mode and user manually turns on appliance(s) after 30s
     for appliance in appliances:
         idle_power = await appliance.get_power()
+        # Give a 5% margin since the test for idle is <=
+        idle_power += (idle_power * .05)
         appliance.set_appliance_idle_power(idle_power)
         logger.custom(f"We have set the IDLE power: {idle_power} for the appliance: {appliance.get_appliance_name()}")
     logger.custom(f"We have set the IDLE power for the appliance(s)")
