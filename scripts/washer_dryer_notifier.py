@@ -149,7 +149,7 @@ class Appliance():
 
 
     def get_appliance_mode(self) -> ApplianceMode:
-        return self.appliance_mode
+        return self.appliance_plug.appliance_plug_info.appliance_plug_name
     
 
     def set_appliance_mode(self, mode: ApplianceMode) -> None:
@@ -157,6 +157,7 @@ class Appliance():
     
     
     def set_appliance_idle_power(self, appliance_idle_power: float) -> None:
+        logger.custom(f"DEBUG DEBUG set_appliance_idle_power: appliance_idle_power: {appliance_idle_power}")
         self.appliance_idle_power = appliance_idle_power
 
 
@@ -165,6 +166,7 @@ class Appliance():
     
 
     def set_appliance_running_power(self, appliance_running_power: float) -> None:
+        logger.custom(f"DEBUG DEBUG set_appliance_running_power: appliance_running_power: {appliance_running_power}")
         self.appliance_running_power = appliance_running_power
     
 
@@ -179,17 +181,21 @@ class Appliance():
             ApplianceMode: Resulting State
         '''
         logger.info(f"{self.get_appliance_name()}: query: ENTRY mode: {self.appliance_mode}")
-        power = await self.get_power()
+        power: float = await self.get_power()
+        # logger.custom(f"{self.get_appliance_name()}: query: idle: {self.appliance_idle_power}, power: {power}, mode: {self.appliance_mode}")
         match self.appliance_mode:
             case ApplianceMode.IDLE:
-                if power <= (2 * self.appliance_idle_power):
+                idle_power_threshold: float = (2 * self.appliance_idle_power)
+                # logger.custom(f"DEBUG DEBUG{self.get_appliance_name()}: query: power: {type(power)}, idle_power_threshold: {type(idle_power_threshold)}")
+                if power <= idle_power_threshold:
+                    # logger.custom(f"DEBUG DEBUG {self.get_appliance_name()}: query: IDLE mode")
                     pass
                 else:
                     self.appliance_mode = ApplianceMode.RUNNING
             case ApplianceMode.RUNNING:
-                if power == self.appliance_idle_power:
+                if power <= self.appliance_idle_power:
                     self.appliance_mode = ApplianceMode.FINISHED
-        logger.info(f"{self.get_appliance_name()}: query: EXIT mode: {self.appliance_mode}")
+        # logger.custom(f"DEBUG {self.get_appliance_name()}: query: EXIT mode: {self.appliance_mode}")
         return self.appliance_mode
     
 
@@ -322,10 +328,15 @@ def read_config_file(appliances: list[Appliance]) -> Union[None, Exception]:
     config = configparser.ConfigParser()
     try:
         config.read(CONFIG_FILE)
+        # logger.custom(f"DEBUG DEBUG DEBUG: read_config: {CONFIG_FILE}")
         for appliance in appliances:
             section_name = appliance.get_appliance_name()
-            appliance.set_appliance_idle_power = config[section_name][IDLE_TAG]
-            appliance.set_appliance_running_power = config[section_name][RUNNING_TAG]
+            idle_power = config[section_name][IDLE_TAG]
+            running_power = config[section_name][RUNNING_TAG]
+            # logger.custom(f"DEBUG DEBUG DEBUG DEBUG: section_name: {section_name}, idle: {idle_power}, running: {running_power}")
+            appliance.set_appliance_idle_power(float(idle_power))
+            appliance.set_appliance_running_power(float(running_power))
+            logger.custom(f"{appliance.get_appliance_name()}: idle_power: {appliance.appliance_idle_power}, running_power: {appliance.appliance_running_power}")
     except Exception as e:
         msg = f"Exception in read_config_file: {e}"
         logger.error(msg)
@@ -395,6 +406,7 @@ async def verify_appliances(appliance_plug_infos: list[AppliancePlugInfo]) -> Un
         return []
     appliances: list[Appliance] = []
     for appliance_plug in appliance_plugs:
+        # logger.custom(f"verify_appliances: adding appliance_plug: {appliance_plug}")
         appliances.append(Appliance(appliance_plug))
     return appliances
 
